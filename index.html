@@ -162,13 +162,19 @@
   .compare-col{margin-bottom:16px;}
   .compare-label{font-weight:700;margin-bottom:8px;color:var(--text);}
   .dot-grid{
+    position:relative;
     display:flex;flex-wrap:wrap;gap:4px;max-height:110px;overflow:hidden;
     padding:10px;background:var(--navy-deep);border-radius:8px;border:1px solid var(--border);
     align-items:center;
   }
+  .dot-grid.is-clipped::after{
+    content:'';position:absolute;left:0;right:0;bottom:0;height:26px;
+    background:linear-gradient(rgba(14,32,54,0) 0%, var(--navy-deep) 85%);
+    pointer-events:none;
+  }
   .dot-item{width:9px;height:9px;border-radius:50%;background:var(--orange);flex:none;}
   .box-item{width:13px;height:13px;border-radius:2px;background:var(--teal);flex:none;}
-  .more-label{color:var(--text-dim);font-size:.85rem;font-weight:600;padding-left:6px;}
+  .grid-more-label{color:var(--text-dim);font-size:.85rem;font-weight:600;margin-top:6px;white-space:normal;}
   .total-time{margin-top:8px;font-size:1.2rem;font-weight:800;color:var(--orange);}
   #ctTotal{color:var(--teal);}
 
@@ -288,6 +294,11 @@
     .bar-row{grid-template-columns:60px 1fr 68px;gap:6px;}
     .bar-row span:last-child{font-size:.85rem;}
 
+    /* time comparison dot/box grid -> smaller cap area & pieces */
+    .dot-grid{max-height:90px;padding:8px;gap:3px;}
+    .dot-item{width:6px;height:6px;}
+    .box-item{width:10px;height:10px;}
+
     /* economic impact cards -> 1 column */
     .econ-grid{grid-template-columns:1fr;}
     .econ-card{padding:16px 14px;}
@@ -379,11 +390,13 @@
     <div class="compare-col">
       <div class="compare-label">재래식 (품목당 2분) — <span id="bbCount"></span>개 품목</div>
       <div class="dot-grid" id="dotGrid"></div>
+      <div class="grid-more-label" id="dotGridMore"></div>
       <div class="total-time" id="bbTotal"></div>
     </div>
     <div class="compare-col">
       <div class="compare-label">컨테이너 (20개/컨테이너, 컨테이너당 3분) — <span id="ctCount"></span>개 컨테이너</div>
       <div class="dot-grid" id="boxGrid"></div>
+      <div class="grid-more-label" id="boxGridMore"></div>
       <div class="total-time" id="ctTotal"></div>
     </div>
     <div class="bar-chart">
@@ -463,8 +476,15 @@ const MIN_PER_ITEM_BREAKBULK = 2;     // 재래식: 품목 1개당 2분
 const ITEMS_PER_CONTAINER   = 20;     // 컨테이너 1개당 품목 20개
 const MIN_PER_CONTAINER     = 3;      // 컨테이너: 1개당 3분
 
-const DOT_DISPLAY_CAP = 400;          // 점 그리드 표시 상한
-const BOX_DISPLAY_CAP = 200;          // 박스 그리드 표시 상한
+const DOT_DISPLAY_CAP_DESKTOP = 400;  // 점 그리드 표시 상한 (768px 초과)
+const BOX_DISPLAY_CAP_DESKTOP = 200;  // 박스 그리드 표시 상한 (768px 초과)
+const DOT_DISPLAY_CAP_MOBILE = 140;   // 점 그리드 표시 상한 (768px 이하)
+const BOX_DISPLAY_CAP_MOBILE = 70;    // 박스 그리드 표시 상한 (768px 이하, 데스크톱과 동일 비율 2:1)
+
+const mobileMediaQuery = window.matchMedia('(max-width:768px)');
+function isMobileViewport() { return mobileMediaQuery.matches; }
+function getDotDisplayCap() { return isMobileViewport() ? DOT_DISPLAY_CAP_MOBILE : DOT_DISPLAY_CAP_DESKTOP; }
+function getBoxDisplayCap() { return isMobileViewport() ? BOX_DISPLAY_CAP_MOBILE : BOX_DISPLAY_CAP_DESKTOP; }
 
 const SHIP_LOAD_ANIM_MIN_SEC = 1.5;   // 적재 애니메이션 최소 길이(초)
 const SHIP_LOAD_ANIM_MAX_SEC = 6;     // 적재 애니메이션 최대 길이(초) - 발표 중 지루하지 않도록 상한
@@ -522,6 +542,8 @@ const bbCountEl = document.getElementById('bbCount');
 const ctCountEl = document.getElementById('ctCount');
 const dotGridEl = document.getElementById('dotGrid');
 const boxGridEl = document.getElementById('boxGrid');
+const dotGridMoreEl = document.getElementById('dotGridMore');
+const boxGridMoreEl = document.getElementById('boxGridMore');
 const bbTotalEl = document.getElementById('bbTotal');
 const ctTotalEl = document.getElementById('ctTotal');
 const barBB = document.getElementById('barBB');
@@ -627,7 +649,7 @@ presetRow.appendChild(resetBtn);
 /* =========================================================
    시간 비교 렌더링
    ========================================================= */
-function renderPieceGrid(container, count, cap, cls) {
+function renderPieceGrid(container, count, cap, cls, moreLabelEl) {
   container.innerHTML = '';
   const shown = Math.min(count, cap);
   const frag = document.createDocumentFragment();
@@ -637,11 +659,10 @@ function renderPieceGrid(container, count, cap, cls) {
     frag.appendChild(d);
   }
   container.appendChild(frag);
-  if (count > cap) {
-    const more = document.createElement('div');
-    more.className = 'more-label';
-    more.textContent = `+ ${(count - cap).toLocaleString('ko-KR')}개 더`;
-    container.appendChild(more);
+  const isClipped = count > cap;
+  container.classList.toggle('is-clipped', isClipped);
+  if (moreLabelEl) {
+    moreLabelEl.textContent = isClipped ? `+ ${(count - cap).toLocaleString('ko-KR')}개 더` : '';
   }
 }
 
@@ -855,8 +876,8 @@ function render() {
   bbCountEl.textContent = itemCount.toLocaleString('ko-KR');
   ctCountEl.textContent = containerCount.toLocaleString('ko-KR');
 
-  renderPieceGrid(dotGridEl, itemCount, DOT_DISPLAY_CAP, 'dot-item');
-  renderPieceGrid(boxGridEl, containerCount, BOX_DISPLAY_CAP, 'box-item');
+  renderPieceGrid(dotGridEl, itemCount, getDotDisplayCap(), 'dot-item', dotGridMoreEl);
+  renderPieceGrid(boxGridEl, containerCount, getBoxDisplayCap(), 'box-item', boxGridMoreEl);
 
   bbTotalEl.textContent = `총 ${formatMinutes(bbMinutes)}`;
   ctTotalEl.textContent = `총 ${formatMinutes(ctMinutes)}`;
@@ -961,6 +982,9 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+/* 모바일/데스크톱 경계를 넘나들 때만 그리드 표시 상한을 다시 계산 */
+mobileMediaQuery.addEventListener('change', () => render());
 
 /* 초기 렌더 */
 render();
